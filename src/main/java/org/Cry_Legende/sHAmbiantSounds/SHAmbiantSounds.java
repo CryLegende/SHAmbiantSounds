@@ -2,21 +2,26 @@ package org.Cry_Legende.sHAmbiantSounds;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
+import java.util.Locale;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Level;
 
 public class SHAmbiantSounds extends JavaPlugin {
 
-    private record AmbiantSound(Sound sound, float pitch, float volume, Location location, String replayEvery) {
+    // Le monde est résolu à chaque lecture : il peut être chargé après onEnable (PhantomWorlds)
+    private record AmbiantSound(Sound sound, float pitch, float volume, String worldName, double x, double y, double z, String replayEvery) {
         public void play() {
-            if (location.isWorldLoaded()) {
-                location.getWorld().playSound(location, sound, volume, pitch);
+            World world = Bukkit.getWorld(worldName);
+            if (world != null) {
+                world.playSound(new Location(world, x, y, z), sound, volume, pitch);
             }
         }
     }
@@ -55,16 +60,8 @@ public class SHAmbiantSounds extends JavaPlugin {
                 continue;
             }
 
-            World world = Bukkit.getWorld(worldName);
-            if (world == null) {
-                getLogger().warning("Le monde '" + worldName + "' pour le son '" + key + "' est introuvable.");
-                continue;
-            }
-
-            Sound sound;
-            try {
-                sound = Sound.valueOf(soundName.toUpperCase());
-            } catch (IllegalArgumentException e) {
+            Sound sound = sound(soundName);
+            if (sound == null) {
                 getLogger().warning("Son '" + soundName + "' invalide pour '" + key + "'.");
                 continue;
             }
@@ -74,11 +71,10 @@ public class SHAmbiantSounds extends JavaPlugin {
                 double x = Double.parseDouble(posParts[0]);
                 double y = Double.parseDouble(posParts[1]);
                 double z = Double.parseDouble(posParts[2]);
-                Location location = new Location(world, x, y, z);
                 float pitch = (float) soundConfig.getDouble("pitch", 1.0);
                 float volume = (float) soundConfig.getDouble("volume", 1.0);
 
-                AmbiantSound ambiantSound = new AmbiantSound(sound, pitch, volume, location, replayEvery);
+                AmbiantSound ambiantSound = new AmbiantSound(sound, pitch, volume, worldName, x, y, z, replayEvery);
                 playAndScheduleNext(ambiantSound);
 
             } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
@@ -96,6 +92,21 @@ public class SHAmbiantSounds extends JavaPlugin {
                 playAndScheduleNext(soundData);
             }
         }.runTaskLater(this, delay);
+    }
+
+    /** Son lu en config : ancien nom (ENTITY_PLAYER_LEVELUP) ou clé (minecraft:entity.player.levelup). */
+    static Sound sound(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String s = raw.trim();
+        if (s.indexOf(':') >= 0 || s.indexOf('.') >= 0) {
+            NamespacedKey key = NamespacedKey.fromString(s.toLowerCase(Locale.ROOT));
+            return key == null ? null : Registry.SOUND_EVENT.get(key);
+        }
+        try {
+            return (Sound) Sound.class.getField(s.toUpperCase(Locale.ROOT)).get(null);
+        } catch (ReflectiveOperationException | ClassCastException e) {
+            return null;
+        }
     }
 
     /**
